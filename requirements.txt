@@ -1,0 +1,8 @@
+selenium
+chromedriver_autoinstaller
+time
+datetime
+logging
+random
+argparse
+pandas
