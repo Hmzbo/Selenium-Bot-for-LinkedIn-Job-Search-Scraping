@@ -6,3 +6,4 @@ logging
 random
 argparse
 pandas
+tqdm

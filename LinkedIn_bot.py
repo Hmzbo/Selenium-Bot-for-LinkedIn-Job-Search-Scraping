@@ -1,5 +1,6 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 import chromedriver_autoinstaller
 
 import time
@@ -8,7 +9,7 @@ import logging
 import random
 import argparse
 import pandas as pd
-
+from tqdm import tqdm
 
 
 class LinkedIn_bot:
@@ -19,12 +20,16 @@ class LinkedIn_bot:
         logging.info("Starting driver")
         self.driver = webdriver.Chrome()
         logging.info("Initialization successful")
+        logging.warning("This automated scraper uses few seconds of random waits throughout\
+                         the whole process to mimic human behaviour!")
 
 
-    def random_wait(self):
+    def random_wait(self, a=4, b=6):
         '''Wait a randion amount of time'''
-
-        delay = random.randint(4,6)
+        if type(a)==int:
+            delay = random.randint(a,b)
+        else:
+            delay = random.uniform(a,b)
         time.sleep(delay)
 
     def search_jobs(self, job_title='', location='United States'):
@@ -43,13 +48,17 @@ class LinkedIn_bot:
         except:
             pass
 
-        search_job_name_input = self.driver.find_element(by=By.XPATH, value='//input[@placeholder="Search job titles or companies"]')
+        search_job_name_input = self.driver.find_element(by=By.XPATH, value='//input[@id="job-search-bar-keywords"]')
+        search_job_name_input.send_keys(Keys.CONTROL + "a")
+        search_job_name_input.send_keys(Keys.DELETE)
         search_job_name_input.send_keys(job_title)
 
-        search_job_location_input = self.driver.find_element(by=By.XPATH, value='//input[@placeholder="Location"]')
+        search_job_location_input = self.driver.find_element(by=By.XPATH, value='//input[@id="job-search-bar-location"]')
+        search_job_location_input.send_keys(Keys.CONTROL + "a")
+        search_job_location_input.send_keys(Keys.DELETE)
         search_job_location_input.send_keys(location)
 
-        search_job_location_input = self.driver.find_element(by=By.XPATH, value='//button[@data-tracking-control-name="homepage-jobseeker_search-jobs-search-btn"]')
+        search_job_location_input = self.driver.find_element(by=By.XPATH, value='//button[@data-tracking-control-name="public_jobs_jobs-search-bar_base-search-bar-search-submit"]')
         search_job_location_input.click()
         logging.info(f"Search for '{job_title}' in '{location}' successful")
     
@@ -64,24 +73,37 @@ class LinkedIn_bot:
 
         while scroll:
             height = self.driver.execute_script("return document.body.scrollHeight")
-            for i in range(1, height, 5):
-                self.driver.execute_script(f"window.scrollTo(0, {height});")
-    
-            self.random_wait()
-            try:
-                load_more = self.driver.find_element(by=By.XPATH, value='//button[@data-tracking-control-name="infinite-scroller_show-more"]')
-                load_more.click()
-                self.random_wait()
-            except:
-                pass
-            new_height = self.driver.execute_script("return document.body.scrollHeight")
+            current_cursor_height = self.driver.execute_script("return window.scrollY")
+            page_length = height - current_cursor_height
+            
+            for i in tqdm(range(int(current_cursor_height), int(height), 5), desc=f"Scrolling page {scroll_page}"):
+                if i < current_cursor_height+page_length*0.05 or i > current_cursor_height+page_length*0.80:
+                    self.random_wait(a=0.02, b=0.2)
+                self.driver.execute_script(f"window.scrollTo(0, {i});")
 
+            
+            self.random_wait()
+
+            new_height = self.driver.execute_script("return document.body.scrollHeight")
+            if new_height==height:
+                try:
+                    load_more = self.driver.find_element(by=By.XPATH, value='//button[contains(., "See more jobs")]')
+                    self.driver.execute_script("arguments[0].scrollIntoView();", load_more)
+                    load_more.send_keys("\n")
+                    self.random_wait()
+                    logging.info("Loading More results button clicked!")
+                except Exception as e:
+                    logging.info(f"{e}")
+                    pass
+            new_height = self.driver.execute_script("return document.body.scrollHeight")
+            logging.info(f"{new_height}, {last_height}, {scroll_page}")
             if new_height == last_height or scroll_page==max_page:
                 scroll = False
 
             scroll_page+=1
             last_height = new_height
-        logging.info("Successful loaded all search results")
+            self.random_wait()
+        logging.info("Successfully loaded all search results.")
     
     def time_ago_to_month_year(self, time_ago):
         '''Calculate the job posting month'''
@@ -99,14 +121,14 @@ class LinkedIn_bot:
         return job_post_month, job_post_year
     
     def close_session(self):
-        '''This function closes the actual session'''
+        '''This function closes the current session'''
         logging.info("Closing session")
         self.driver.close()
     
     def run(self, job_title, location, max_pages=40):
         '''Running the bot to extract all the job search results data'''
         self.results_dic = {'Position':[], 'Company_Name':[], 'Location':[], 'Post_Month':[], 'Post_Year':[], 'Details':[]}
-        website = 'https://www.linkedin.com/jobs/'
+        website = 'https://www.linkedin.com/jobs/search?position=1&pageNum=0'
         self.driver.get(website)
         self.driver.set_window_position(0, 0)
         self.driver.set_window_size(1280, 720)
@@ -119,17 +141,37 @@ class LinkedIn_bot:
         nbr_jobs = len(jobs_list)
         logging.info(f"{nbr_jobs} jobs found")
 
-        for job in jobs_list:
+        skipped = 0
+        for job in tqdm(jobs_list, desc="Extracting Job Offers Details"):
             self.driver.execute_script("arguments[0].scrollIntoView();", job)
             job.click()
             self.random_wait()
             show_more = self.driver.find_element(by=By.CLASS_NAME, value="show-more-less-html__button")
-            show_more.click()
+            self.driver.implicitly_wait(2)
+            try:
+                show_more.click()
+            except:
+                continue
             self.random_wait()
 
-            [position, company, location, *remaining] = job.text.split('\n')
-            time_ago = remaining[-1]
-            details = self.driver.find_element(by=By.XPATH, value="//div[@class='show-more-less-html__markup']").text
+            [position, position, company, location, *remaining] = job.text.split('\n')
+            try:
+                time_ago = time_ago = self.driver.find_element(by=By.XPATH, value="//span[@class='posted-time-ago__text topcard__flavor--metadata']").text
+            except:
+                try:
+                    time_ago = remaining[-1]
+                except:
+                    time_ago = "10 years ago"
+                    pass
+                pass
+
+            
+            try:
+                details = self.driver.find_element(by=By.XPATH, value="//div[@class='show-more-less-html__markup relative overflow-hidden']").text
+            except:
+                details = ''
+                skipped += 1
+                continue
             job_post_month, job_post_year = self.time_ago_to_month_year(time_ago)
 
             self.results_dic['Position'].append(position)
@@ -143,6 +185,7 @@ class LinkedIn_bot:
         self.close_session()
 
         return self.results_dic
+    
 
 def parse_args():
     parser = argparse.ArgumentParser(description='LinkedIn Bot job search')
