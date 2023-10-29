@@ -1,9 +1,4 @@
-selenium
-chromedriver_autoinstaller
-time
-datetime
-logging
-random
-argparse
-pandas
-tqdm
+selenium==4.11.2
+chromedriver-autoinstaller==0.4.0
+pandas==2.0.2
+tqdm==4.65.0
